@@ -198,4 +198,4 @@ with gr.Blocks(theme=gr.themes.Soft(), title="Simulador AssetGuard") as demo:
                         outputs=[log_auditoria])
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(show_api=False)
