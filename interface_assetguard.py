@@ -1,201 +1,216 @@
-import datetime
-import pandas as pd
+# Instale as bibliotecas necessárias antes de executar:
+# pip install gradio pandas
+
 import gradio as gr
+import pandas as pd
+from datetime import datetime
+
+# --- 1. SIMULAÇÃO DO BANCO DE DADOS COM PANDAS ---
+# Baseado no seu diagrama de classes e na planilha de exemplo.
+
+# Tabela de Funcionários (Simulando a classe Funcionario e Papéis)
+funcionarios_data = {
+    'id_responsavel': ['AUX-56195840', 'ENF-28585028', 'ENF-96828591', 'ADM-00000001'],
+    'nome': ['Denilson Machado Carvalho', 'José Calabreso da Silva', 'Carlinhos Pereira de Jesus', 'Gestor do Sistema'],
+    'profissao': ['Auxiliar de almoxarifado', 'Enfermeiro', 'Enfermeiro', 'Administrador']
+}
+funcionarios_df = pd.DataFrame(funcionarios_data)
+
+locais_hospitalares = [
+    "ALMOXARIFADO-CENTRAL-01",
+    "ALMOXARIFADO-CENTRAL-02",
+    "CME-01",
+    "CME-02",
+    "CME-03",
+]
+
+# Tabela de Instrumentais (Simulando a classe Objeto)
+instrumentais_data = {
+    'tag_id': ['TAG-BISTURI-001', 'TAG-PINCA-007', 'TAG-TESOURA-003'],
+    'nome': ['Bisturi Elétrico Alpha', 'Pinça Anatômica Beta', 'Tesoura Cirúrgica Gamma'],
+    'lote': ['LOTE-2024-A', 'LOTE-2024-B', 'LOTE-2023-C'],
+    'status_atual': ['Armazenado', 'Em Operação', 'Em esterilização'],
+    'localizacao_atual': ['ALMOXARIFADO-CENTRAL-02', 'PS-04', 'CME-03'],
+    'responsavel_atual_id': ['AUX-56195840', 'ENF-28585028', 'ENF-28585028']
+}
+instrumentais_df = pd.DataFrame(instrumentais_data)
+
+# [cite_start]Tabela de Log de Eventos (Exatamente como na sua planilha PDF) [cite: 1]
+log_data = {
+    'tag_id': ['TAG-PINCA-007', 'TAG-PINCA-007', 'TAG-PINCA-007', 'TAG-PINCA-007', 'TAG-PINCA-007', 'TAG-PINCA-007', 'TAG-PINCA-007', 'TAG-PINCA-007'],
+    'Responsável': ["Denilson Machado Carvalho", "José Calabreso da Silva", "José Calabreso da Silva", "José Calabreso da Silva", "José Calabreso da Silva", "Carlinhos Pereira de Jesus", "Carlinhos Pereira de Jesus", "Denilson Machado Carvalho"],
+    'ID do responsável': ["AUX-56195840", "ENF-28585028", "ENF-28585028", "ENF-28585028", "ENF-28585028", "ENF-96828591", "ENF-96828592", "AUX-56195840"],
+    'Profissão': ["Auxiliar de almoxarifado", "Enfermeiro", "Enfermeiro", "Enfermeiro", "Enfermeiro", "Enfermeiro", "Enfermeiro", "Auxiliar de almoxarifado"],
+    'ID da sala': ["ALMOXARIFADO-CENTRAL-02", "ALMOXARIFADO-CENTRAL-02", "PS-04", "PS-04", "CME-03", "CME-03", "ALMOXARIFADO-CENTRAL-02", "ALMOXARIFADO-CENTRAL-02"],
+    'ID da antena': [None, None, "ANT-08", "ANT-08", "ANT-10", None, "ANT-05", None],
+    'ID do leitor': [None, None, "LEITOR-06", "LEITOR-06", "LEITOR-13", None, "LEITOR-02", None],
+    'Data e hora': ["2025-03-28T12:07:14Z", "2025-03-30T15:10:47Z", "2025-03-30T15:13:32Z", "2025-03-30T17:40:19Z", "2025-03-30T17:45:54Z", "2025-03-30T18:52:41Z", "2025-03-30T19:04:47Z", "2025-03-30T19:15:18Z"],
+    'Status': ["Armazenado", "Saída", "Operação", "Movimentação", "Em esterilização", "Esterilizado", "Movimentação", "Armazenado"]
+}
+log_df = pd.DataFrame(log_data)
+log_df['Data e hora'] = pd.to_datetime(log_df['Data e hora'])
+
+# Simulação de solicitações pendentes
+solicitacoes_data = {
+    'id_solicitacao': [101, 102],
+    'solicitante_nome': ['José Calabreso da Silva', 'Dr. House'],
+    'tag_id_solicitado': ['TAG-BISTURI-001', 'TAG-TESOURA-003'],
+    'status': ['Pendente', 'Pendente']
+}
+solicitacoes_df = pd.DataFrame(solicitacoes_data)
 
 
-class ServidorAssetGuard:
-    def __init__(self):
-        self.db = {
-            'ativos': {},
-            'usuarios': {
-                'ana_instrumentadora': {'nome': 'Ana Souza', 'papel': 'Instrumentador'},
-                'joao_auditor': {'nome': 'João Lima', 'papel': 'Auditor'}
-            },
-            'log_auditoria': []
-        }
+# --- 2. FUNÇÕES DE LÓGICA DE NEGÓCIO (Backend do Protótipo) ---
 
-    def _registrar_log_auditoria(self, usuario_id, acao, detalhes):
-        log_entry = {
-            'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'usuario_id': usuario_id,
-            'acao': acao,
-            'detalhes': detalhes
-        }
-        self.db['log_auditoria'].append(log_entry)
+def registrar_evento(tag_id, novo_status, responsavel_id, sala_id):
+    """Função central para registrar qualquer movimentação no sistema."""
+    global log_df, instrumentais_df
 
-    def cadastrar_ativo(self, rfid_tag, descricao, usuario_id='ana_instrumentadora'):
-        if rfid_tag in self.db['ativos']:
-            return
-        self.db['ativos'][rfid_tag] = {
-            'descricao': descricao,
-            'local': 'Central de Esterilização',
-            'status': 'Esterilizado ✅',
-            'ultimo_movimento_por': usuario_id
-        }
-        self._registrar_log_auditoria(usuario_id, 'CADASTRO', f"Ativo '{rfid_tag}' criado (Esterilizado ✅).")
+    # Pega informações do funcionário
+    info_responsavel = funcionarios_df[funcionarios_df['id_responsavel'] == responsavel_id].iloc[0]
 
-    def movimentar_ativo_servidor(self, rfid_tag, novo_local, usuario_id):
-        if rfid_tag not in self.db['ativos']:
-            return
-        ativo = self.db['ativos'][rfid_tag]
-        local_antigo = ativo['local']
-        ativo['local'] = novo_local
-        ativo['ultimo_movimento_por'] = usuario_id
+    novo_evento = {
+        'tag_id': tag_id,
+        'Responsável': info_responsavel['nome'],
+        'ID do responsável': responsavel_id,
+        'Profissão': info_responsavel['profissao'],
+        'ID da sala': sala_id,
+        'ID da antena': 'N/A (Manual)',
+        'ID do leitor': 'N/A (Manual)',
+        'Data e hora': datetime.now(),
+        'Status': novo_status
+    }
+    log_df = pd.concat([log_df, pd.DataFrame([novo_evento])], ignore_index=True)
 
-        # --- Atualiza o status conforme o local ---
-        if novo_local == "Central de Esterilização":
-            ativo['status'] = "Esterilizado ✅"
-        elif "Sala de Cirurgia" in novo_local:
-            ativo['status'] = "Em Uso ⚠️"
-        elif novo_local == "Sala de Pós-Operatório":
-            ativo['status'] = "Aguardando Esterilização 🔄"
-        else:
-            ativo['status'] = "Indefinido ❓"
+    # Atualiza o status atual do instrumental
+    instrumentais_df.loc[instrumentais_df['tag_id'] == tag_id, 'status_atual'] = novo_status
+    instrumentais_df.loc[instrumentais_df['tag_id'] == tag_id, 'localizacao_atual'] = sala_id
+    instrumentais_df.loc[instrumentais_df['tag_id'] == tag_id, 'responsavel_atual_id'] = responsavel_id
 
-        detalhes = f"Ativo '{rfid_tag}' movido de '{local_antigo}' para '{novo_local}' (status: {ativo['status']})."
-        self._registrar_log_auditoria(usuario_id, 'MOVIMENTAÇÃO', detalhes)
-
-    def consultar_ativos_dataframe(self):
-        if not self.db['ativos']:
-            return pd.DataFrame(columns=['RFID Tag', 'Descrição', 'Local', 'Status'])
-
-        df = pd.DataFrame.from_dict(self.db['ativos'], orient='index')
-        df.reset_index(inplace=True)
-        df.rename(columns={'index': 'RFID Tag', 'descricao': 'Descrição',
-                           'local': 'Local', 'status': 'Status'}, inplace=True)
-        return df[['RFID Tag', 'Descrição', 'Local', 'Status']]
-
-    def consultar_auditoria(self, rfid_tag):
-        logs_filtrados = [log for log in self.db['log_auditoria'] if rfid_tag in log['detalhes']]
-        if not logs_filtrados:
-            return f"Nenhum registro de auditoria para a tag: {rfid_tag}"
-
-        output_str = f"--- 📖 TRILHA DE AUDITORIA PARA O ATIVO: {rfid_tag} ---\n"
-        for log in logs_filtrados:
-            output_str += f"- [{log['timestamp']}] {log['acao']} por '{log['usuario_id']}': {log['detalhes']}\n"
-        return output_str
+    return f"Evento '{novo_status}' para o item {tag_id} registrado com sucesso."
 
 
-# --- LÓGICA DO LEITOR PORTÁTIL ---
-class LeitorPortatil:
-    def __init__(self, usuario_id: str):
-        self.usuario_logado = usuario_id
-        self.conectado = True
-        self.fila_sincronizacao = []
+def get_dashboard_data():
+    em_uso = instrumentais_df[instrumentais_df['status_atual'] == 'Em Operação'].shape[0]
+    em_esterilizacao = instrumentais_df[instrumentais_df['status_atual'] == 'Em esterilização'].shape[0]
+    armazenados = instrumentais_df[instrumentais_df['status_atual'] == 'Armazenado'].shape[0]
+    log_recente = log_df.sort_values(by='Data e hora', ascending=False).head(5)
+    return em_uso, em_esterilizacao, armazenados, log_recente
 
-    def desconectar(self):
-        self.conectado = False
+def autorizar_saida(id_solicitacao, responsavel_id_auxiliar):
+    global solicitacoes_df
+    if id_solicitacao is None:
+        return "Selecione uma solicitação.", solicitacoes_df[solicitacoes_df['status']=='Pendente']
+        
+    solicitacao = solicitacoes_df[solicitacoes_df['id_solicitacao'] == id_solicitacao].iloc[0]
+    tag_id = solicitacao['tag_id_solicitado']
+    
+    # Atualiza status da solicitação
+    solicitacoes_df.loc[solicitacoes_df['id_solicitacao'] == id_solicitacao, 'status'] = 'Aprovada'
+    
+    # Registra o evento de saída
+    msg = registrar_evento(tag_id, "Saída", responsavel_id_auxiliar, "ALMOXARIFADO-CENTRAL-02")
+    
+    solicitacoes_pendentes = solicitacoes_df[solicitacoes_df['status']=='Pendente']
+    return f"Solicitação {id_solicitacao} aprovada. {msg}", solicitacoes_pendentes
 
-    def conectar(self):
-        self.conectado = True
+def get_historico(tag_id):
+    if tag_id is None:
+        return pd.DataFrame(), "Selecione um item para ver o histórico."
+    historico = log_df[log_df['tag_id'] == tag_id].sort_values(by='Data e hora', ascending=False)
+    status_atual = instrumentais_df[instrumentais_df['tag_id'] == tag_id].iloc[0]
+    info_status = f"""
+    **Status Atual:** {status_atual['status_atual']}
+    **Localização:** {status_atual['localizacao_atual']}
+    **Responsável:** {status_atual['responsavel_atual_id']}
+    """
+    return historico, info_status
 
+def confirmar_etapa_manual(tag_id, novo_status, responsavel_id_enfermeiro, local):
+    if tag_id is None or novo_status is None or local is None:
+        return "Por favor, preencha todos os campos."
+    
+    msg = registrar_evento(tag_id, novo_status, responsavel_id_enfermeiro, local)
+    return msg
 
-# --- FUNÇÕES AUXILIARES ---
-def criar_estado_inicial():
-    servidor_hospital = ServidorAssetGuard()
-    servidor_hospital.cadastrar_ativo('TAG-001', 'Kit Cirurgia Cardíaca')
-    servidor_hospital.cadastrar_ativo('TAG-002', 'Kit Ortopedia Geral')
-    servidor_hospital.cadastrar_ativo('TAG-003', 'Kit Neurocirurgia')
-    leitor_da_ana = LeitorPortatil('ana_instrumentadora')
-    return servidor_hospital, leitor_da_ana
+# --- 3. CONSTRUÇÃO DA INTERFACE GRÁFICA COM GRADIO ---
 
-
-def _atualizar_info_leitor(leitor):
-    status = "ONLINE ✅" if leitor.conectado else "OFFLINE ⚠️"
-    fila = len(leitor.fila_sincronizacao)
-    return f"Status: {status}<br>Ações na fila: {fila}"
-
-
-# --- FUNÇÕES DE LÓGICA (BOTÕES) ---
-def funcao_movimentar(servidor, leitor, rfid_tag, novo_local):
-    if leitor.conectado:
-        servidor.movimentar_ativo_servidor(rfid_tag, novo_local, leitor.usuario_logado)
-        mensagem = "<span style='color:green;'>✅ Ativo movimentado com sucesso.</span>"
-    else:
-        acao_offline = {
-            'funcao': 'movimentar_ativo_servidor',
-            'args': [rfid_tag, novo_local, leitor.usuario_logado]
-        }
-        leitor.fila_sincronizacao.append(acao_offline)
-        mensagem = "<span style='color:orange;'>⚠️ Leitor OFFLINE: movimentação enfileirada para sincronização.</span>"
-
-    return servidor, leitor, servidor.consultar_ativos_dataframe(), _atualizar_info_leitor(leitor), mensagem
-
-
-def funcao_ficar_offline(leitor):
-    leitor.desconectar()
-    return leitor, _atualizar_info_leitor(leitor), "<span style='color:orange;'>🔌 Leitor ficou OFFLINE.</span>"
-
-
-def funcao_ficar_online_e_sincronizar(servidor, leitor):
-    leitor.conectar()
-    mensagem = "<span style='color:blue;'>🛰️ Leitor voltou ONLINE.</span>"
-    if leitor.fila_sincronizacao:
-        for acao in leitor.fila_sincronizacao:
-            funcao_nome = acao['funcao']
-            args = acao['args']
-            getattr(servidor, funcao_nome)(*args)
-        leitor.fila_sincronizacao.clear()
-        mensagem += " <span style='color:green;'>🔄 Ações pendentes sincronizadas com sucesso!</span>"
-
-    return servidor, leitor, servidor.consultar_ativos_dataframe(), _atualizar_info_leitor(leitor), mensagem
-
-
-def funcao_consultar_auditoria(servidor, rfid_tag):
-    return servidor.consultar_auditoria(rfid_tag)
-
-
-# --- INTERFACE GRADIO ---
-with gr.Blocks(theme=gr.themes.Soft(), title="Simulador AssetGuard") as demo:
-    servidor_inicial, leitor_inicial = criar_estado_inicial()
-    servidor_state = gr.State(servidor_inicial)
-    leitor_state = gr.State(leitor_inicial)
-
-    gr.Markdown("## Monitoramento de Ativos Hospitalares")
-
-    with gr.Row():
-        with gr.Column(scale=1):
-            gr.Markdown("### Painel de Controle")
-            rfid_dropdown = gr.Dropdown(choices=['TAG-001', 'TAG-002', 'TAG-003'],
-                                        label="Selecione o Ativo (RFID Tag)", value='TAG-001')
-            local_dropdown = gr.Dropdown(choices=['Sala de Cirurgia 01', 'Sala de Cirurgia 02',
-                                                  'Sala de Pós-Operatório', 'Central de Esterilização'],
-                                         label="Selecione o Novo Local", value='Sala de Cirurgia 01')
-            btn_movimentar = gr.Button("🚀 Movimentar Ativo", variant="primary")
-            gr.Markdown("---")
+with gr.Blocks(theme=gr.themes.Soft(), title="AssetGuard - Protótipo") as demo:
+    
+    # Simula um "login" para contextualizar as ações
+    gr.Markdown("# Protótipo AssetGuard - Monitoramento de Ativos")
+    usuario_logado_id = gr.Dropdown(
+        label="Simular Login Como:",
+        choices=list(funcionarios_df['id_responsavel']),
+        value='ADM-00000001'
+    )
+    
+    with gr.Tabs():
+        # --- TELA 1: DASHBOARD ---
+        with gr.TabItem("Dashboard"):
             with gr.Row():
-                btn_offline = gr.Button("🔌 Ficar Offline")
-                btn_online = gr.Button("🛰️ Ficar Online e Sincronizar")
-            gr.Markdown("---")
-            btn_auditoria = gr.Button("📖 Consultar Auditoria do Ativo Selecionado")
+                em_uso_box = gr.Number(label="Instrumentais em Uso")
+                em_esterilizacao_box = gr.Number(label="Em Esterilização")
+                armazenados_box = gr.Number(label="Armazenados")
+            gr.Markdown("### Últimas Movimentações")
+            log_recente_df = gr.DataFrame(column_widths=["10%", "18%", "12%", "15%", "15%", "10%", "10%", "17%", "10%"])
+            
+            demo.load(get_dashboard_data, outputs=[em_uso_box, em_esterilizacao_box, armazenados_box, log_recente_df])
 
-        with gr.Column(scale=2):
-            gr.Markdown("### Status do Sistema")
-            info_leitor = gr.HTML(value=_atualizar_info_leitor(leitor_inicial))
-            mensagem_alerta = gr.HTML(value="<span style='color:gray;'>Pronto para uso.</span>")
-            gr.Markdown("### Posição Atual dos Ativos (Visão do Servidor)")
-            tabela_ativos = gr.DataFrame(value=servidor_inicial.consultar_ativos_dataframe(),
-                                         label="Banco de Dados de Ativos", interactive=False)
-            log_auditoria = gr.Textbox(label="Trilha de Auditoria", lines=10,
-                                       interactive=False,
-                                       placeholder="Clique em 'Consultar Auditoria' para ver o histórico de um ativo aqui.")
+        # --- TELA 2: GESTÃO DE SOLICITAÇÕES (ALMOXARIFADO) ---
+        with gr.TabItem("Gestão de Solicitações (Almoxarifado)"):
+            gr.Markdown("## Autorizar Saída de Instrumentais")
+            solicitacoes_pendentes_df = gr.DataFrame(solicitacoes_df[solicitacoes_df['status']=='Pendente'])
+            
+            with gr.Row():
+                solicitacao_selecionada = gr.Dropdown(
+                    label="Selecione a Solicitação para Aprovar",
+                    choices=list(solicitacoes_df[solicitacoes_df['status']=='Pendente']['id_solicitacao'])
+                )
+                autorizar_btn = gr.Button("Autorizar e Registrar Saída", variant="primary")
+            
+            msg_autorizacao = gr.Textbox(label="Status da Operação")
+            autorizar_btn.click(
+                autorizar_saida,
+                inputs=[solicitacao_selecionada, usuario_logado_id],
+                outputs=[msg_autorizacao, solicitacoes_pendentes_df]
+            )
 
-    # Ligações dos botões
-    btn_movimentar.click(fn=funcao_movimentar,
-                         inputs=[servidor_state, leitor_state, rfid_dropdown, local_dropdown],
-                         outputs=[servidor_state, leitor_state, tabela_ativos, info_leitor, mensagem_alerta])
-
-    btn_offline.click(fn=funcao_ficar_offline,
-                      inputs=[leitor_state],
-                      outputs=[leitor_state, info_leitor, mensagem_alerta])
-
-    btn_online.click(fn=funcao_ficar_online_e_sincronizar,
-                     inputs=[servidor_state, leitor_state],
-                     outputs=[servidor_state, leitor_state, tabela_ativos, info_leitor, mensagem_alerta])
-
-    btn_auditoria.click(fn=funcao_consultar_auditoria,
-                        inputs=[servidor_state, rfid_dropdown],
-                        outputs=[log_auditoria])
+        # --- TELA 3: RASTREAMENTO E HISTÓRICO DO ATIVO ---
+        with gr.TabItem("Rastreamento de Ativo (Auditoria)"):
+            gr.Markdown("## Trilha de Auditoria do Instrumental")
+            item_selecionado = gr.Dropdown(
+                label="Selecione o Instrumental (pela TAG ID)",
+                choices=list(instrumentais_df['tag_id'])
+            )
+            status_atual_info = gr.Markdown()
+            gr.Markdown("### Histórico Completo de Eventos")
+            historico_df = gr.DataFrame(column_widths=["10%", "18%", "12%", "15%", "15%", "10%", "10%", "17%", "10%"])
+            
+            item_selecionado.change(
+                get_historico,
+                inputs=item_selecionado,
+                outputs=[historico_df, status_atual_info]
+            )
+        
+        # --- TELA 4: CONFIRMAÇÃO DE ETAPAS (CME / ENFERMAGEM) ---
+        with gr.TabItem("Confirmação de Etapas (Enfermagem)"):
+            gr.Markdown("## Registrar Evento Manualmente")
+            gr.Markdown("Use esta tela para registrar eventos importantes como a conclusão da esterilização no CME.")
+            
+            with gr.Row():
+                item_para_atualizar = gr.Dropdown(label="Instrumental (TAG ID)", choices=list(instrumentais_df['tag_id']))
+                novo_status_escolha = gr.Dropdown(label="Novo Status", choices=["Esterilizado", "Devolvido ao Almoxarifado", "Em Manutenção"])
+                local_evento = gr.Dropdown(label="Local do Evento", choices=locais_hospitalares)
+            
+            confirmar_etapa_btn = gr.Button("Confirmar Etapa", variant="primary")
+            msg_confirmacao_etapa = gr.Textbox(label="Status da Operação")
+            
+            confirmar_etapa_btn.click(
+                confirmar_etapa_manual,
+                inputs=[item_para_atualizar, novo_status_escolha, usuario_logado_id, local_evento],
+                outputs=[msg_confirmacao_etapa]
+            )
 
 if __name__ == "__main__":
-    demo.launch(show_api=False)
+    demo.launch()
